@@ -1,0 +1,7 @@
+CompileFlags:
+  CompilationDatabase: build
+---
+If:
+  PathMatch: include/.*\.(h|hpp)
+CompileFlags:
+  Add: [-xc++, -std=c++20]

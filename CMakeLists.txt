@@ -1,0 +1,51 @@
+cmake_minimum_required(VERSION 3.28)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+project(Physeng
+  VERSION 0.1.0
+  LANGUAGES C CXX)
+
+function(configure_cpp_target target)
+  target_compile_features(${target} PUBLIC cxx_std_20)
+  set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+endfunction()
+
+add_library(common INTERFACE)
+target_include_directories(common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_library(physeng_physics STATIC
+  src/physics/body.cpp
+  src/physics/world.cpp
+  src/physics/collision.cpp
+  src/physics/collision_filter.cpp
+  src/physics/distance_constraint.cpp
+  src/physics/forces.cpp
+  src/physics/springs.cpp
+  src/physics/scene.cpp
+  src/physics/objects/enclosure.cpp
+  src/physics/objects/spring.cpp
+  src/physics/objects/rope.cpp)
+target_link_libraries(physeng_physics PUBLIC common)
+configure_cpp_target(physeng_physics)
+
+option(PHYSENG_BUILD_APP "Build the OpenGL application" ON)
+if(PHYSENG_BUILD_APP)
+  find_package(glfw3 3.3 REQUIRED)
+  add_library(glad STATIC external/glad/src/gl.c)
+  target_include_directories(glad PUBLIC external/glad/include)
+
+  add_library(renderer STATIC src/renderer/renderer.cpp)
+  target_link_libraries(renderer PUBLIC common PRIVATE glfw glad)
+  # GLAD provides the OpenGL declarations; GLFW only handles the window.
+  target_compile_definitions(renderer PRIVATE GLFW_INCLUDE_NONE)
+  configure_cpp_target(renderer)
+
+  add_executable(Physeng
+    main.cpp
+    src/app/demo_scene.cpp
+    src/app/draw_scene.cpp
+    src/app/mouse_drag.cpp)
+  target_link_libraries(Physeng PRIVATE physeng_physics renderer)
+  configure_cpp_target(Physeng)
+endif()
+
