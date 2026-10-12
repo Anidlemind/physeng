@@ -15,13 +15,13 @@ namespace renderer {
 
 namespace {
 
-constexpr const char* vertexSource = R"glsl(#version 460 core
+constexpr const char* vertexSource = R"glsl(#version 410 core
 layout(location = 0) in vec2 position;
 uniform vec2 objectPosition;
 uniform vec2 objectHalfExtents;
 uniform vec2 cameraHalfExtents;
 uniform float objectAngle;
-layout(location = 0) out vec2 localPosition;
+out vec2 localPosition;
 
 void main() {
   localPosition = position;
@@ -34,9 +34,9 @@ void main() {
 }
 )glsl";
 
-constexpr const char* fragmentSource = R"glsl(#version 460 core
+constexpr const char* fragmentSource = R"glsl(#version 410 core
 layout(location = 0) out vec4 fragmentColor;
-layout(location = 0) in vec2 localPosition;
+in vec2 localPosition;
 uniform int drawCircle;
 uniform vec4 objectColor;
 uniform vec2 objectHalfExtents;
@@ -152,7 +152,12 @@ Renderer::Renderer() {
     }
     glfwInitialized_ = true;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+#endif
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     window_ = glfwCreateWindow(1280, 720, "Physeng | grab a body and drag", nullptr, nullptr);
     if (!window_) {
@@ -161,6 +166,9 @@ Renderer::Renderer() {
     glfwMakeContextCurrent(window_);
     if (!gladLoadGL(glfwGetProcAddress)) {
       throw std::runtime_error("Failed to load OpenGL functions");
+    }
+    if (!GLAD_GL_VERSION_4_1) {
+      throw std::runtime_error("OpenGL 4.1 or newer is required");
     }
 
     program_ = CreateProgram();
@@ -178,16 +186,19 @@ Renderer::Renderer() {
     // Reusable corners from -1 to +1; the shader scales them to the body's size.
     constexpr std::array<float, 8> vertices{-1, -1, 1, -1, 1, 1, -1, 1};
     constexpr std::array<GLuint, 6> indices{0, 1, 2, 2, 3, 0};
-    glCreateBuffers(1, &vertexBuffer_);
-    glNamedBufferStorage(vertexBuffer_, sizeof(vertices), vertices.data(), 0);
-    glCreateBuffers(1, &indexBuffer_);
-    glNamedBufferStorage(indexBuffer_, sizeof(indices), indices.data(), 0);
-    glCreateVertexArrays(1, &vertexArray_);
-    glVertexArrayVertexBuffer(vertexArray_, 0, vertexBuffer_, 0, 2 * sizeof(float));
-    glVertexArrayElementBuffer(vertexArray_, indexBuffer_);
-    glVertexArrayAttribFormat(vertexArray_, 0, 2, GL_FLOAT, GL_FALSE, 0);
-    glVertexArrayAttribBinding(vertexArray_, 0, 0);
-    glEnableVertexArrayAttrib(vertexArray_, 0);
+
+    glGenVertexArrays(1, &vertexArray_);
+    glBindVertexArray(vertexArray_);
+    glGenBuffers(1, &vertexBuffer_);
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices.data(), GL_STATIC_DRAW);
+    glGenBuffers(1, &indexBuffer_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer_);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, FramebufferSizeCallback);
