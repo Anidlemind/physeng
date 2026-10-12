@@ -201,6 +201,7 @@ Renderer::Renderer() {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glfwSetWindowUserPointer(window_, this);
+    InitializeWindowPosition();
     glfwSetFramebufferSizeCallback(window_, FramebufferSizeCallback);
     int width = 0, height = 0;
     glfwGetFramebufferSize(window_, &width, &height);
@@ -254,6 +255,27 @@ void Renderer::PollEvents() {
 void Renderer::FramebufferSizeCallback(GLFWwindow* window, int width, int height) {
   auto* renderer = static_cast<Renderer*>(glfwGetWindowUserPointer(window));
   renderer->UpdateFramebufferView(width, height);
+}
+
+void Renderer::InitializeWindowPosition() {
+#if GLFW_VERSION_MAJOR > 3 || (GLFW_VERSION_MAJOR == 3 && GLFW_VERSION_MINOR >= 4)
+  // Wayland deliberately does not expose desktop window positions.
+  if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
+    return;
+  }
+#endif
+  int x = 0, y = 0;
+  glfwGetWindowPos(window_, &x, &y);
+  if (glfwGetError(nullptr) != GLFW_NO_ERROR) {
+    return;
+  }
+  windowPosition_ = WindowPositionSample{x, y, std::chrono::steady_clock::now()};
+  glfwSetWindowPosCallback(window_, WindowPositionCallback);
+}
+
+void Renderer::WindowPositionCallback(GLFWwindow* window, int x, int y) {
+  auto* renderer = static_cast<Renderer*>(glfwGetWindowUserPointer(window));
+  renderer->windowPosition_ = WindowPositionSample{x, y, std::chrono::steady_clock::now()};
 }
 
 void Renderer::UpdateFramebufferView(int width, int height) {

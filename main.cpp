@@ -2,6 +2,7 @@
 #include "src/app/demo_scene.hpp"
 #include "src/app/draw_scene.hpp"
 #include "src/app/mouse_drag.hpp"
+#include "src/app/window_motion.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -20,11 +21,15 @@ int main() {
     constexpr double timeStep = 1.0 / 120.0;
 
     app::MouseDrag drag;
+    app::WindowMotion windowMotion;
+    windowMotion.Update(renderer.WindowPosition(), timestamp);
+    common::Vec2 pendingWindowVelocityChange;
     bool previousMouseDown = false;
     std::puts("Left mouse: drag bodies; release to drop.");
 
     while (!renderer.ShouldClose()) {
       renderer.PollEvents();
+
       const auto cursor = renderer.CursorWorldPosition();
       const bool mouseDown = renderer.IsMouseButtonDown(renderer::MouseButton::Left);
       if (!mouseDown || !cursor) {
@@ -35,10 +40,26 @@ int main() {
       previousMouseDown = mouseDown;
 
       const auto currentTime = Clock::now();
-      // Limit catch-up after a debugger pause or a stalled frame.
+      const auto windowVelocityChange = windowMotion.Update(renderer.WindowPosition(), currentTime);
+      pendingWindowVelocityChange.x += windowVelocityChange.x;
+      pendingWindowVelocityChange.y += windowVelocityChange.y;
+
       accumulator += std::min(std::chrono::duration<double>(currentTime - timestamp).count(), 0.1);
       timestamp = currentTime;
       while (accumulator >= timeStep) {
+        // In the moving window's frame, bodies lag behind its change in velocity.
+        // Consume once, even when this frame needs several physics steps.
+        if (pendingWindowVelocityChange.x != 0.0f || pendingWindowVelocityChange.y != 0.0f) {
+          const auto bodies = world.Bodies();
+          for (physeng::BodyId id = 0; id < bodies.size(); ++id) {
+            if (bodies[id].inverseMass > 0.0f) {
+              world.ApplyImpulse(id,
+                                 {-pendingWindowVelocityChange.x / bodies[id].inverseMass,
+                                  -pendingWindowVelocityChange.y / bodies[id].inverseMass});
+            }
+          }
+          pendingWindowVelocityChange = {};
+        }
         if (cursor) {
           drag.Update(world, *cursor, timeStep);
         }
