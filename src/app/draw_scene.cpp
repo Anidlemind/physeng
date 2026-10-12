@@ -1,6 +1,7 @@
 #include "draw_scene.hpp"
 #include "mouse_drag.hpp"
 #include "physeng/scene.hpp"
+#include "physeng/shape.hpp"
 #include "renderer/renderer.hpp"
 
 #include <algorithm>
@@ -42,8 +43,10 @@ void DrawShape(renderer::Renderer& renderer,
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, physeng::BoxShape>) {
           renderer.DrawRectangle(
               position, {value.halfExtents.x + padding, value.halfExtents.y + padding}, angle);
-        } else {
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, physeng::CircleShape>) {
           renderer.DrawCircle(position, value.radius + padding, angle);
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, physeng::PolygonShape>) {
+          renderer.DrawPolygon(position, value.Vertices(), angle);
         }
       },
       shape);
@@ -59,7 +62,8 @@ Color BodyColor(const physeng::Scene& scene, const physeng::Collider& collider) 
   if (scene.world.GetBody(collider.body).inverseMass == 0.0f) {
     return wallColor;
   }
-  if (std::holds_alternative<physeng::BoxShape>(collider.shape)) {
+  if (std::holds_alternative<physeng::BoxShape>(collider.shape) ||
+      std::holds_alternative<physeng::PolygonShape>(collider.shape)) {
     return boxColor;
   }
   return IsRopeBody(scene, collider.body) ? ropeColor : circleColor;
@@ -86,7 +90,10 @@ void DrawBodies(renderer::Renderer& renderer,
       renderer.SetColor(highlightColor);
       DrawShape(renderer, collider.shape, body.position, body.angle, 0.035f);
     }
-    renderer.SetColor(BodyColor(scene, collider));
+    renderer.SetColor(highlighted == collider.body &&
+                              std::holds_alternative<physeng::PolygonShape>(collider.shape)
+                          ? highlightColor
+                          : BodyColor(scene, collider));
     DrawShape(renderer, collider.shape, body.position, body.angle);
   }
 }

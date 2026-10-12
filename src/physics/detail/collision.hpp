@@ -21,6 +21,11 @@ std::optional<Contact> ContactBetween(const Body& a, CircleShape sa, const Body&
 std::optional<Contact> ContactBetween(const Body& a, BoxShape sa, const Body& b, BoxShape sb);
 std::optional<Contact> ContactBetween(const Body& a, CircleShape sa, const Body& b, BoxShape sb);
 std::optional<Contact> ContactBetween(const Body& a, BoxShape sa, const Body& b, CircleShape sb);
+std::optional<Contact> ContactBetween(const Body& a, const PolygonShape& sa, const Body& b, const PolygonShape& sb);
+std::optional<Contact> ContactBetween(const Body& a, const PolygonShape& sa, const Body& b, BoxShape sb);
+std::optional<Contact> ContactBetween(const Body& a, BoxShape sa, const Body& b, const PolygonShape& sb);
+std::optional<Contact> ContactBetween(const Body& a, CircleShape sa, const Body& b, const PolygonShape& sb);
+std::optional<Contact> ContactBetween(const Body& a, const PolygonShape& sa, const Body& b, CircleShape sb);
 void ResolveContact(Body& a,
                     Body& b,
                     Contact contact,

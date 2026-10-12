@@ -5,6 +5,7 @@
 #include "detail/material.hpp"
 #include "detail/math.hpp"
 #include "detail/spring.hpp"
+#include "physeng/shape.hpp"
 
 #include <cmath>
 #include <limits>
@@ -48,8 +49,10 @@ ColliderId World::AddCollider(BodyId body, Shape shape, Material material) {
       [](const auto& value) {
         if constexpr (std::is_same_v<std::decay_t<decltype(value)>, BoxShape>) {
           return Positive(value.halfExtents.x) && Positive(value.halfExtents.y);
-        } else {
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, CircleShape>) {
           return Positive(value.radius);
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, PolygonShape>) {
+          return value.Vertices().size() >= 3;
         }
       },
       shape);
@@ -69,8 +72,10 @@ ColliderId World::AddCollider(BodyId body, Shape shape, Material material) {
             return (static_cast<double>(value.halfExtents.x) * value.halfExtents.x +
                     static_cast<double>(value.halfExtents.y) * value.halfExtents.y) /
                    3.0;
-          } else {
+          } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, CircleShape>) {
             return 0.5 * static_cast<double>(value.radius) * value.radius;
+          } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, PolygonShape>) {
+            return value.InertiaPerMass();
           }
         },
         shape);

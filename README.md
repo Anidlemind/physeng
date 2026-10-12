@@ -1,7 +1,7 @@
 # Physeng
 
 A small 2D physics sandbox. The demo has a hanging
-spring, a rope attached to a box, and a ball you can throw around.
+spring, a rope attached to a box, a ball, and a convex polygon you can throw around.
 
 **Hold the left mouse button to grab a body. Release it to let go.** Movable bodies
 highlight when you hover over them.

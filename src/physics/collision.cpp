@@ -309,6 +309,36 @@ void ResolveFloor(Body& body,
           contact.penetration = std::max(floorY - bottom, 0.0f);
           contact.points[0] = {body.position.x, bottom};
           contact.pointCount = 1;
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(value)>, PolygonShape>) {
+          float bottom = std::numeric_limits<float>::infinity();
+          for (Vec2 vertex : value.Vertices()) {
+            bottom = std::min(bottom, body.LocalToWorld(vertex).y);
+          }
+          if (bottom > floorY + contactTolerance) {
+            return;
+          }
+          contact.penetration = std::max(floorY - bottom, 0.0f);
+          Vec2 left, right;
+          bool found = false;
+          for (Vec2 local : value.Vertices()) {
+            const Vec2 vertex = body.LocalToWorld(local);
+            if (vertex.y <= bottom + contactTolerance) {
+              if (!found) {
+                left = right = vertex;
+                found = true;
+              }
+              if (vertex.x < left.x) {
+                left = vertex;
+              }
+              if (vertex.x > right.x) {
+                right = vertex;
+              }
+            }
+          }
+          if (found) {
+            contact.points = {left, right};
+            contact.pointCount = Length(Sub(right, left)) > contactTolerance ? 2 : 1;
+          }
         } else {
           const auto vertices = Vertices(body, value);
           float bottom = vertices[0].y;

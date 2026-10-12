@@ -51,6 +51,20 @@ physeng::SceneDesc MakeDemoScene() {
       },
   };
 
+  scene.bodies.push_back({
+      .name = "ramp",
+      .body = {.position = {-4.0f, -2.8f}, .inverseMass = 0.0f},
+      .shape = physeng::PolygonShape({{-1.5f, -0.5f}, {1.5f, -0.5f}, {-1.5f, 1.0f}}),
+      .material = {.friction = 0.6f},
+  });
+  scene.bodies.push_back({
+      .name = "polygon",
+      .body = {.position = {-4.0f, 1.5f}, .angularDamping = 0.05f},
+      .shape =
+          physeng::PolygonShape({{-0.55f, -0.35f}, {0.55f, -0.35f}, {0.4f, 0.35f}, {-0.3f, 0.6f}}),
+      .material = {.restitution = 0.15f, .friction = 0.5f},
+  });
+
   scene.springs.push_back({
       .first = "spring_anchor",
       .second = "spring_weight",

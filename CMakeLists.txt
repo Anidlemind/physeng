@@ -14,6 +14,8 @@ add_library(common INTERFACE)
 target_include_directories(common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(physeng_physics STATIC
+  src/physics/polygon.cpp
+  src/physics/polygon_collision.cpp
   src/physics/body.cpp
   src/physics/world.cpp
   src/physics/collision.cpp
