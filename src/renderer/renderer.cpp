@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -15,13 +16,13 @@ namespace renderer {
 
 namespace {
 
-constexpr const char* vertexSource = R"glsl(#version 460 core
+constexpr const char* vertexSource = R"glsl(#version 410 core
 layout(location = 0) in vec2 position;
 uniform vec2 objectPosition;
 uniform vec2 objectHalfExtents;
 uniform vec2 cameraHalfExtents;
 uniform float objectAngle;
-layout(location = 0) out vec2 localPosition;
+out vec2 localPosition;
 
 void main() {
   localPosition = position;
@@ -34,16 +35,20 @@ void main() {
 }
 )glsl";
 
-constexpr const char* fragmentSource = R"glsl(#version 460 core
+constexpr const char* fragmentSource = R"glsl(#version 410 core
 layout(location = 0) out vec4 fragmentColor;
-layout(location = 0) in vec2 localPosition;
-uniform int drawCircle;
+in vec2 localPosition;
+uniform int shapeKind;
 uniform vec4 objectColor;
 uniform vec2 objectHalfExtents;
 
 void main() {
+  if (shapeKind == 2) {
+    fragmentColor = objectColor;
+    return;
+  }
   vec2 localPoint = localPosition * objectHalfExtents;
-  float distanceToEdge = drawCircle != 0
+  float distanceToEdge = shapeKind == 1
     ? length(localPoint) - objectHalfExtents.x
     : max(abs(localPoint.x) - objectHalfExtents.x, abs(localPoint.y) - objectHalfExtents.y);
   float pixelWidth = max(fwidth(distanceToEdge), 0.0001);
@@ -53,8 +58,7 @@ void main() {
   float border = smoothstep(-max(1.5 * pixelWidth, 0.015), 0.0, distanceToEdge);
   float lighting = 0.96 + 0.04 * localPosition.y;
   vec3 color = objectColor.rgb * lighting * mix(1.0, 0.72, border);
-  // A radial mark makes a circle's otherwise invisible rotation observable.
-  if (drawCircle != 0 && abs(localPosition.y) < 0.06 &&
+  if (shapeKind == 1 && abs(localPosition.y) < 0.06 &&
       localPosition.x > 0.15 && localPosition.x < 0.85) {
     color = objectColor.rgb * 0.3;
   }
@@ -152,7 +156,12 @@ Renderer::Renderer() {
     }
     glfwInitialized_ = true;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#else
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
+#endif
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     window_ = glfwCreateWindow(1280, 720, "Physeng | grab a body and drag", nullptr, nullptr);
     if (!window_) {
@@ -162,32 +171,47 @@ Renderer::Renderer() {
     if (!gladLoadGL(glfwGetProcAddress)) {
       throw std::runtime_error("Failed to load OpenGL functions");
     }
+    if (!GLAD_GL_VERSION_4_1) {
+      throw std::runtime_error("OpenGL 4.1 or newer is required");
+    }
 
     program_ = CreateProgram();
     positionLocation_ = glGetUniformLocation(program_, "objectPosition");
     halfExtentsLocation_ = glGetUniformLocation(program_, "objectHalfExtents");
     cameraLocation_ = glGetUniformLocation(program_, "cameraHalfExtents");
     angleLocation_ = glGetUniformLocation(program_, "objectAngle");
-    circleLocation_ = glGetUniformLocation(program_, "drawCircle");
+    shapeKindLocation_ = glGetUniformLocation(program_, "shapeKind");
     colorLocation_ = glGetUniformLocation(program_, "objectColor");
     if (positionLocation_ == -1 || halfExtentsLocation_ == -1 || cameraLocation_ == -1 ||
-        angleLocation_ == -1 || circleLocation_ == -1 || colorLocation_ == -1) {
+        angleLocation_ == -1 || shapeKindLocation_ == -1 || colorLocation_ == -1) {
       throw std::runtime_error("Required shader uniform not found");
     }
 
     // Reusable corners from -1 to +1; the shader scales them to the body's size.
     constexpr std::array<float, 8> vertices{-1, -1, 1, -1, 1, 1, -1, 1};
     constexpr std::array<GLuint, 6> indices{0, 1, 2, 2, 3, 0};
-    glCreateBuffers(1, &vertexBuffer_);
-    glNamedBufferStorage(vertexBuffer_, sizeof(vertices), vertices.data(), 0);
-    glCreateBuffers(1, &indexBuffer_);
-    glNamedBufferStorage(indexBuffer_, sizeof(indices), indices.data(), 0);
-    glCreateVertexArrays(1, &vertexArray_);
-    glVertexArrayVertexBuffer(vertexArray_, 0, vertexBuffer_, 0, 2 * sizeof(float));
-    glVertexArrayElementBuffer(vertexArray_, indexBuffer_);
-    glVertexArrayAttribFormat(vertexArray_, 0, 2, GL_FLOAT, GL_FALSE, 0);
-    glVertexArrayAttribBinding(vertexArray_, 0, 0);
-    glEnableVertexArrayAttrib(vertexArray_, 0);
+
+    glGenVertexArrays(1, &vertexArray_);
+    glBindVertexArray(vertexArray_);
+    glGenBuffers(1, &vertexBuffer_);
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer_);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices.data(), GL_STATIC_DRAW);
+    glGenBuffers(1, &indexBuffer_);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer_);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glGenVertexArrays(1, &polygonVertexArray_);
+    glBindVertexArray(polygonVertexArray_);
+    glGenBuffers(1, &polygonVertexBuffer_);
+    glBindBuffer(GL_ARRAY_BUFFER, polygonVertexBuffer_);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(common::Vec2), nullptr);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     glfwSetWindowUserPointer(window_, this);
     glfwSetFramebufferSizeCallback(window_, FramebufferSizeCallback);
@@ -211,6 +235,12 @@ Renderer::~Renderer() {
 void Renderer::Shutdown() {
   if (window_) {
     glfwMakeContextCurrent(window_);
+    if (polygonVertexArray_ != 0) {
+      glDeleteVertexArrays(1, &polygonVertexArray_);
+    }
+    if (polygonVertexBuffer_ != 0) {
+      glDeleteBuffers(1, &polygonVertexBuffer_);
+    }
     if (vertexArray_ != 0) {
       glDeleteVertexArrays(1, &vertexArray_);
     }
@@ -272,7 +302,7 @@ void Renderer::DrawShape(common::Vec2 position,
   glProgramUniform2f(program_, positionLocation_, position.x, position.y);
   glProgramUniform2f(program_, halfExtentsLocation_, halfExtents.x, halfExtents.y);
   glProgramUniform1f(program_, angleLocation_, angle);
-  glProgramUniform1i(program_, circleLocation_, circle ? 1 : 0);
+  glProgramUniform1i(program_, shapeKindLocation_, circle ? 1 : 0);
   glUseProgram(program_);
   glBindVertexArray(vertexArray_);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
@@ -284,6 +314,29 @@ void Renderer::DrawRectangle(common::Vec2 position, common::Vec2 halfExtents, fl
 
 void Renderer::DrawCircle(common::Vec2 position, float radius, float angle) {
   DrawShape(position, {radius, radius}, angle, true);
+}
+
+void Renderer::DrawPolygon(common::Vec2 position,
+                           std::span<const common::Vec2> vertices,
+                           float angle) {
+  if (vertices.size() < 3) {
+    return;
+  }
+  if (vertices.size() > static_cast<std::size_t>(std::numeric_limits<GLsizei>::max())) {
+    throw std::invalid_argument("Polygon has too many vertices to draw");
+  }
+  glProgramUniform2f(program_, positionLocation_, position.x, position.y);
+  glProgramUniform2f(program_, halfExtentsLocation_, 1.0f, 1.0f);
+  glProgramUniform1f(program_, angleLocation_, angle);
+  glProgramUniform1i(program_, shapeKindLocation_, 2);
+  glUseProgram(program_);
+  glBindVertexArray(polygonVertexArray_);
+  glBindBuffer(GL_ARRAY_BUFFER, polygonVertexBuffer_);
+  glBufferData(GL_ARRAY_BUFFER,
+               static_cast<GLsizeiptr>(vertices.size_bytes()),
+               vertices.data(),
+               GL_STREAM_DRAW);
+  glDrawArrays(GL_TRIANGLE_FAN, 0, static_cast<GLsizei>(vertices.size()));
 }
 
 void Renderer::DrawSegment(common::Vec2 first, common::Vec2 second, float thickness) {

@@ -14,6 +14,8 @@ add_library(common INTERFACE)
 target_include_directories(common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(physeng_physics STATIC
+  src/physics/polygon.cpp
+  src/physics/polygon_collision.cpp
   src/physics/body.cpp
   src/physics/world.cpp
   src/physics/collision.cpp
@@ -29,8 +31,27 @@ target_link_libraries(physeng_physics PUBLIC common)
 configure_cpp_target(physeng_physics)
 
 option(PHYSENG_BUILD_APP "Build the OpenGL application" ON)
+option(PHYSENG_USE_SYSTEM_GLFW "Use an installed GLFW instead of downloading it" OFF)
 if(PHYSENG_BUILD_APP)
-  find_package(glfw3 3.3 REQUIRED)
+  if(PHYSENG_USE_SYSTEM_GLFW)
+    find_package(glfw3 3.3 REQUIRED)
+  else()
+    include(FetchContent)
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+    if(UNIX AND NOT APPLE)
+      # X11 works with WSLg; Wayland can be enabled when its development files are installed.
+      option(GLFW_BUILD_WAYLAND "Build GLFW's Wayland backend" OFF)
+    endif()
+    FetchContent_Declare(glfw
+      URL https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+      TIMEOUT 60
+      TLS_VERIFY TRUE)
+    FetchContent_MakeAvailable(glfw)
+  endif()
   add_library(glad STATIC external/glad/src/gl.c)
   target_include_directories(glad PUBLIC external/glad/include)
 

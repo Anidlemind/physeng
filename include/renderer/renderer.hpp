@@ -2,6 +2,7 @@
 
 #include "common/vec2.hpp"
 #include <optional>
+#include <span>
 
 struct GLFWwindow;
 
@@ -32,6 +33,7 @@ public:
   void SetColor(Color color);
   void DrawRectangle(common::Vec2 position, common::Vec2 halfExtents, float angle = 0.0f);
   void DrawCircle(common::Vec2 position, float radius, float angle = 0.0f);
+  void DrawPolygon(common::Vec2 position, std::span<const common::Vec2> vertices, float angle = 0.0f);
   void DrawSegment(common::Vec2 first, common::Vec2 second, float thickness = 0.04f);
   void DrawSpring(common::Vec2 first, common::Vec2 second, float width = 0.12f);
   void EndFrame();
@@ -55,11 +57,13 @@ private:
   unsigned int vertexBuffer_ = 0;
   unsigned int indexBuffer_ = 0;
   unsigned int vertexArray_ = 0;
+  unsigned int polygonVertexBuffer_ = 0;
+  unsigned int polygonVertexArray_ = 0;
   int positionLocation_ = -1;
   int halfExtentsLocation_ = -1;
   int cameraLocation_ = -1;
   int angleLocation_ = -1;
-  int circleLocation_ = -1;
+  int shapeKindLocation_ = -1;
   int colorLocation_ = -1;
   float visibleHeight_ = 10.0f;
   common::Vec2 cameraHalfExtents_{1.0f, 5.0f};

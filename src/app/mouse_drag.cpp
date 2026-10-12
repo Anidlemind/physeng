@@ -20,8 +20,18 @@ std::optional<physeng::BodyId> PickBody(const physeng::World& world, common::Vec
           if constexpr (std::is_same_v<std::decay_t<decltype(shape)>, physeng::BoxShape>) {
             return std::abs(offset.x) <= shape.halfExtents.x &&
                    std::abs(offset.y) <= shape.halfExtents.y;
-          } else {
+          } else if constexpr (std::is_same_v<std::decay_t<decltype(shape)>,
+                                              physeng::CircleShape>) {
             return std::hypot(offset.x, offset.y) <= shape.radius;
+          } else {
+            const auto vertices = shape.Vertices();
+            for (std::size_t i = 0; i < vertices.size(); ++i) {
+              const auto a = vertices[i], b = vertices[(i + 1) % vertices.size()];
+              if ((b.x - a.x) * (offset.y - a.y) - (b.y - a.y) * (offset.x - a.x) < 0.0f) {
+                return false;
+              }
+            }
+            return true;
           }
         },
         it->shape);
