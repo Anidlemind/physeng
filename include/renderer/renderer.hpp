@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common/vec2.hpp"
-#include <chrono>
 #include <optional>
 
 struct GLFWwindow;
@@ -14,12 +13,6 @@ enum class MouseButton { Left, Right };
 
 struct Color {
   float r = 1.0f, g = 0.5f, b = 0.0f, a = 1.0f;
-};
-
-struct WindowPositionSample {
-  int x = 0;
-  int y = 0;
-  std::chrono::steady_clock::time_point timestamp;
 };
 
 class Renderer {
@@ -48,14 +41,10 @@ public:
 
   std::optional<common::Vec2> CursorWorldPosition() const;
 
-  std::optional<WindowPositionSample> WindowPosition() const { return windowPosition_; }
-
   common::Vec2 ViewHalfExtents() const { return cameraHalfExtents_; }
 
 private:
   static void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
-  static void WindowPositionCallback(GLFWwindow* window, int x, int y);
-  void InitializeWindowPosition();
   void UpdateFramebufferView(int width, int height);
   void Shutdown();
   void DrawShape(common::Vec2 position, common::Vec2 halfExtents, float angle, bool circle);
@@ -74,7 +63,6 @@ private:
   int colorLocation_ = -1;
   float visibleHeight_ = 10.0f;
   common::Vec2 cameraHalfExtents_{1.0f, 5.0f};
-  std::optional<WindowPositionSample> windowPosition_;
 };
 
 } // namespace renderer

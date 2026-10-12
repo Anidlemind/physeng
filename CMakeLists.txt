@@ -63,8 +63,7 @@ if(PHYSENG_BUILD_APP)
     main.cpp
     src/app/demo_scene.cpp
     src/app/draw_scene.cpp
-    src/app/mouse_drag.cpp
-    src/app/window_motion.cpp)
+    src/app/mouse_drag.cpp)
   target_link_libraries(Physeng PRIVATE physeng_physics renderer)
   configure_cpp_target(Physeng)
 endif()
