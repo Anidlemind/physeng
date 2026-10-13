@@ -63,6 +63,69 @@ void PairImpulse(Body& a, Body& b, Vec2 offsetA, Vec2 offsetB, Vec2 impulse) {
   ImpulseAtOffset(a, Scale(impulse, -1.0f), offsetA);
   ImpulseAtOffset(b, impulse, offsetB);
 }
+
+void PrepareContact(ContactState& state,
+                    Body& a,
+                    Body& b,
+                    Vec2 normal,
+                    const std::array<Vec2, 2>& offsetA,
+                    const std::array<Vec2, 2>& offsetB,
+                    int count,
+                    float threshold,
+                    float restitution,
+                    const Body& impactA,
+                    const Body& impactB,
+                    bool circles = false) {
+  const bool firstPass = !state.prepared;
+  bool matches = state.pointCount == count && Dot(state.normal, normal) > 0.95f;
+  std::array<Vec2, 2> localA{}, localB{};
+  if (!circles) {
+    for (int i = 0; i < count; ++i) {
+      localA[i] = Rotate(offsetA[i], -a.angle);
+      localB[i] = Rotate(offsetB[i], -b.angle);
+    }
+    const auto distance = [&](int current, int previous) {
+      const Vec2 da = Sub(localA[current], state.localAnchorA[previous]);
+      const Vec2 db = Sub(localB[current], state.localAnchorB[previous]);
+      return Dot(da, da) + Dot(db, db);
+    };
+    if (matches && count == 2 &&
+        distance(0, 1) + distance(1, 0) < distance(0, 0) + distance(1, 1)) {
+      std::swap(state.normalImpulse[0], state.normalImpulse[1]);
+      std::swap(state.tangentImpulse[0], state.tangentImpulse[1]);
+      std::swap(state.bounceSpeed[0], state.bounceSpeed[1]);
+      std::swap(state.localAnchorA[0], state.localAnchorA[1]);
+      std::swap(state.localAnchorB[0], state.localAnchorB[1]);
+    }
+    for (int i = 0; i < count && matches; ++i) {
+      matches = distance(i, i) < 0.005f;
+    }
+  }
+  if (!matches) {
+    state = {};
+  }
+  if (firstPass || !matches) {
+    for (int i = 0; i < count; ++i) {
+      const float incoming =
+          Dot(Sub(PointVelocity(impactB, offsetB[i]), PointVelocity(impactA, offsetA[i])), normal);
+      state.bounceSpeed[i] = -incoming > threshold ? -restitution * incoming : 0.0f;
+      if (firstPass && matches) {
+        // Reapply the last step's support and friction impulses before improving them.
+        PairImpulse(a,
+                    b,
+                    offsetA[i],
+                    offsetB[i],
+                    Add(Scale(normal, state.normalImpulse[i]),
+                        Scale(Perpendicular(normal), state.tangentImpulse[i])));
+      }
+    }
+  }
+  state.normal = normal;
+  state.pointCount = count;
+  state.localAnchorA = localA;
+  state.localAnchorB = localB;
+  state.prepared = true;
+}
 } // namespace
 
 std::optional<Contact>
@@ -189,6 +252,92 @@ std::optional<Contact> ContactBetween(const Body& a, BoxShape sa, const Body& b,
   return contact;
 }
 
+void ResolveCircleContact(Body& a,
+                          Body& b,
+                          CircleShape sa,
+                          CircleShape sb,
+                          Material materialA,
+                          Material materialB,
+                          float restitutionThreshold,
+                          const Body& impactA,
+                          const Body& impactB,
+                          ContactState* saved,
+                          bool warmStartOnly) {
+  ContactState scratch;
+  auto& state = saved ? *saved : scratch;
+  const Vec2 delta = Sub(b.position, a.position);
+  const float distanceSquared = Dot(delta, delta);
+  const float radii = sa.radius + sb.radius;
+  const float limit = radii + contactTolerance;
+  const float weight = a.inverseMass + b.inverseMass;
+  if (distanceSquared > limit * limit || weight == 0.0f) {
+    state = {};
+    return;
+  }
+  const float distance = std::sqrt(distanceSquared);
+  const Vec2 normal = distance > 0.0f ? Scale(delta, 1.0f / distance) : Vec2{1, 0};
+  const Vec2 tangent = Perpendicular(normal);
+  const float leverA = 0.5f * (distance + sa.radius - sb.radius), leverB = leverA - distance;
+  const std::array<Vec2, 2> offsetA{Scale(normal, leverA), Vec2{}},
+      offsetB{Scale(normal, leverB), Vec2{}};
+  PrepareContact(state,
+                 a,
+                 b,
+                 normal,
+                 offsetA,
+                 offsetB,
+                 1,
+                 restitutionThreshold,
+                 std::max(materialA.restitution, materialB.restitution),
+                 impactA,
+                 impactB,
+                 true);
+  if (warmStartOnly) {
+    return;
+  }
+  const float speed = Dot(Sub(b.velocity, a.velocity), normal);
+  const float previous = state.normalImpulse[0];
+  state.normalImpulse[0] = std::max(previous + (state.bounceSpeed[0] - speed) / weight, 0.0f);
+  const Vec2 impulse = Scale(normal, state.normalImpulse[0] - previous);
+  if (a.inverseMass > 0.0f) {
+    a.velocity = Sub(a.velocity, Scale(impulse, a.inverseMass));
+  }
+  if (b.inverseMass > 0.0f) {
+    b.velocity = Add(b.velocity, Scale(impulse, b.inverseMass));
+  }
+  const float inertiaA = InverseInertia(a), inertiaB = InverseInertia(b);
+  const float slip = Dot(Sub(b.velocity, a.velocity), tangent) + b.angularVelocity * leverB -
+                     a.angularVelocity * leverA;
+  const float mass = weight + leverA * leverA * inertiaA + leverB * leverB * inertiaB;
+  const double frictionLimit =
+      std::sqrt(static_cast<double>(materialA.friction) * materialB.friction) *
+      state.normalImpulse[0];
+  const float oldFriction = state.tangentImpulse[0];
+  state.tangentImpulse[0] = static_cast<float>(
+      std::clamp(static_cast<double>(oldFriction) - slip / mass, -frictionLimit, frictionLimit));
+  const float friction = state.tangentImpulse[0] - oldFriction;
+  const Vec2 tangentialImpulse = Scale(tangent, friction);
+  if (a.inverseMass > 0.0f) {
+    a.velocity = Sub(a.velocity, Scale(tangentialImpulse, a.inverseMass));
+    a.angularVelocity -= leverA * friction * inertiaA;
+  }
+  if (b.inverseMass > 0.0f) {
+    b.velocity = Add(b.velocity, Scale(tangentialImpulse, b.inverseMass));
+    b.angularVelocity += leverB * friction * inertiaB;
+  }
+  const float penetration = std::max(radii - distance, 0.0f);
+  // Relax moving pairs instead of teleporting the full overlap into their neighbors.
+  // Static surfaces still project fully, so enclosure walls remain solid.
+  const float relaxation = a.inverseMass > 0.0f && b.inverseMass > 0.0f ? 0.25f : 1.0f;
+  const Vec2 correction = Scale(normal, relaxation * std::max(penetration - 0.001f, 0.0f) / weight);
+  if (a.inverseMass > 0.0f) {
+    a.position = Sub(a.position, Scale(correction, a.inverseMass));
+  }
+  if (b.inverseMass > 0.0f) {
+    b.position = Add(b.position, Scale(correction, b.inverseMass));
+  }
+}
+
 void ResolveContact(Body& a,
                     Body& b,
                     Contact contact,
@@ -196,96 +345,108 @@ void ResolveContact(Body& a,
                     Material materialB,
                     float restitutionThreshold,
                     const Body& impactA,
-                    const Body& impactB) {
+                    const Body& impactB,
+                    ContactState* saved,
+                    bool warmStartOnly) {
+  ContactState scratch;
+  auto& state = saved ? *saved : scratch;
   const float weight = a.inverseMass + b.inverseMass;
   if (weight == 0.0f || contact.pointCount == 0) {
+    state = {};
     return;
   }
-  std::array<Vec2, 2> offsetA, offsetB;
-  std::array<float, 2> velocityError{}, effectiveMass{}, normalImpulses{};
+  std::array<Vec2, 2> offsetA{}, offsetB{};
+  std::array<float, 2> mass{}, error{}, impulse{};
   for (int i = 0; i < contact.pointCount; ++i) {
     offsetA[i] = Sub(contact.points[i], a.position);
     offsetB[i] = Sub(contact.points[i], b.position);
-    const float speed =
-        Dot(Sub(PointVelocity(b, offsetB[i]), PointVelocity(a, offsetA[i])), contact.normal);
-    const float incomingSpeed =
-        Dot(Sub(PointVelocity(impactB, offsetB[i]), PointVelocity(impactA, offsetA[i])),
-            contact.normal);
-    const float bounceSpeed =
-        -incomingSpeed > restitutionThreshold
-            ? -std::max(materialA.restitution, materialB.restitution) * incomingSpeed
-            : 0.0f;
-    // Keep the original impact target; later solver passes must not erase restitution.
-    velocityError[i] = speed - bounceSpeed;
-    effectiveMass[i] = EffectiveMass(a, b, offsetA[i], offsetB[i], contact.normal);
+    mass[i] = EffectiveMass(a, b, offsetA[i], offsetB[i], contact.normal);
   }
-
-  if (contact.pointCount == 2) {
-    const float coupledMass =
-        weight +
-        InverseInertia(a) * Cross(offsetA[0], contact.normal) * Cross(offsetA[1], contact.normal) +
-        InverseInertia(b) * Cross(offsetB[0], contact.normal) * Cross(offsetB[1], contact.normal);
-    const float determinant = effectiveMass[0] * effectiveMass[1] - coupledMass * coupledMass;
-    if (determinant > 1.0e-5f * effectiveMass[0] * effectiveMass[1]) {
-      // Contact impulses can push surfaces apart, but cannot pull them together.
-      const float j0 =
-          (coupledMass * velocityError[1] - effectiveMass[1] * velocityError[0]) / determinant;
-      const float j1 =
-          (coupledMass * velocityError[0] - effectiveMass[0] * velocityError[1]) / determinant;
-      if (j0 >= 0.0f && j1 >= 0.0f) {
-        normalImpulses = {j0, j1};
-      } else {
-        const float single0 = std::max(-velocityError[0] / effectiveMass[0], 0.0f);
-        const float single1 = std::max(-velocityError[1] / effectiveMass[1], 0.0f);
-        if (coupledMass * single0 + velocityError[1] >= 0.0f) {
-          normalImpulses[0] = single0;
-        } else if (coupledMass * single1 + velocityError[0] >= 0.0f) {
-          normalImpulses[1] = single1;
-        }
-      }
-    } else {
-      // Near-duplicate points or fixed rotations: one midpoint is sufficient.
-      offsetA[0] = Scale(Add(offsetA[0], offsetA[1]), 0.5f);
-      offsetB[0] = Scale(Add(offsetB[0], offsetB[1]), 0.5f);
-      const float speed =
-          Dot(Sub(PointVelocity(b, offsetB[0]), PointVelocity(a, offsetA[0])), contact.normal);
-      const float incomingSpeed =
-          Dot(Sub(PointVelocity(impactB, offsetB[0]), PointVelocity(impactA, offsetA[0])),
-              contact.normal);
-      const float bounceSpeed =
-          -incomingSpeed > restitutionThreshold
-              ? -std::max(materialA.restitution, materialB.restitution) * incomingSpeed
-              : 0.0f;
-      normalImpulses[0] = std::max((bounceSpeed - speed) /
-                                       EffectiveMass(a, b, offsetA[0], offsetB[0], contact.normal),
-                                   0.0f);
-      contact.pointCount = 1;
-    }
-  } else {
-    normalImpulses[0] = std::max(-velocityError[0] / effectiveMass[0], 0.0f);
+  const float coupledMass = contact.pointCount == 2
+                                ? weight +
+                                      InverseInertia(a) * Cross(offsetA[0], contact.normal) *
+                                          Cross(offsetA[1], contact.normal) +
+                                      InverseInertia(b) * Cross(offsetB[0], contact.normal) *
+                                          Cross(offsetB[1], contact.normal)
+                                : 0.0f;
+  const float determinant = mass[0] * mass[1] - coupledMass * coupledMass;
+  if (contact.pointCount == 2 && determinant <= 1.0e-5f * mass[0] * mass[1]) {
+    // Fixed rotation or nearly duplicate points: solve at their midpoint.
+    offsetA[0] = Scale(Add(offsetA[0], offsetA[1]), 0.5f);
+    offsetB[0] = Scale(Add(offsetB[0], offsetB[1]), 0.5f);
+    mass[0] = EffectiveMass(a, b, offsetA[0], offsetB[0], contact.normal);
+    contact.pointCount = 1;
+  }
+  PrepareContact(state,
+                 a,
+                 b,
+                 contact.normal,
+                 offsetA,
+                 offsetB,
+                 contact.pointCount,
+                 restitutionThreshold,
+                 std::max(materialA.restitution, materialB.restitution),
+                 impactA,
+                 impactB);
+  if (warmStartOnly) {
+    return;
   }
   for (int i = 0; i < contact.pointCount; ++i) {
-    PairImpulse(a, b, offsetA[i], offsetB[i], Scale(contact.normal, normalImpulses[i]));
+    error[i] =
+        Dot(Sub(PointVelocity(b, offsetB[i]), PointVelocity(a, offsetA[i])), contact.normal) -
+        state.bounceSpeed[i];
   }
-
+  if (contact.pointCount == 2) {
+    // Solve for total nonnegative impulses, then apply only their change.
+    const float b0 =
+        error[0] - mass[0] * state.normalImpulse[0] - coupledMass * state.normalImpulse[1];
+    const float b1 =
+        error[1] - coupledMass * state.normalImpulse[0] - mass[1] * state.normalImpulse[1];
+    const float j0 = (coupledMass * b1 - mass[1] * b0) / determinant;
+    const float j1 = (coupledMass * b0 - mass[0] * b1) / determinant;
+    if (j0 >= 0.0f && j1 >= 0.0f) {
+      impulse = {j0, j1};
+    } else if (b0 >= 0.0f && b1 >= 0.0f) {
+      impulse = {};
+    } else {
+      const float single0 = std::max(-b0 / mass[0], 0.0f);
+      const float single1 = std::max(-b1 / mass[1], 0.0f);
+      if (coupledMass * single0 + b1 >= 0.0f) {
+        impulse[0] = single0;
+      } else if (coupledMass * single1 + b0 >= 0.0f) {
+        impulse[1] = single1;
+      }
+    }
+  } else {
+    impulse[0] = std::max(state.normalImpulse[0] - error[0] / mass[0], 0.0f);
+  }
+  for (int i = 0; i < contact.pointCount; ++i) {
+    PairImpulse(
+        a, b, offsetA[i], offsetB[i], Scale(contact.normal, impulse[i] - state.normalImpulse[i]));
+    state.normalImpulse[i] = impulse[i];
+  }
   const Vec2 tangent = Perpendicular(contact.normal);
   const double friction = std::sqrt(static_cast<double>(materialA.friction) * materialB.friction);
   for (int i = 0; i < contact.pointCount; ++i) {
     const float slip =
         Dot(Sub(PointVelocity(b, offsetB[i]), PointVelocity(a, offsetA[i])), tangent);
-    const double limit = friction * normalImpulses[i];
-    const float j = static_cast<float>(std::clamp(
-        -static_cast<double>(slip) / EffectiveMass(a, b, offsetA[i], offsetB[i], tangent),
+    const double limit = friction * state.normalImpulse[i];
+    const float previous = state.tangentImpulse[i];
+    state.tangentImpulse[i] = static_cast<float>(std::clamp(
+        static_cast<double>(previous) - slip / EffectiveMass(a, b, offsetA[i], offsetB[i], tangent),
         -limit,
         limit));
-    PairImpulse(a, b, offsetA[i], offsetB[i], Scale(tangent, j));
+    PairImpulse(a, b, offsetA[i], offsetB[i], Scale(tangent, state.tangentImpulse[i] - previous));
   }
-
-  // Remove overlap separately from velocity so correction does not add bounce energy.
+  const float relaxation = a.inverseMass > 0.0f && b.inverseMass > 0.0f ? 0.25f : 1.0f;
   const Vec2 correction =
-      Scale(contact.normal, std::max(contact.penetration - 0.0001f, 0.0f) / weight);
-  a.position = Sub(a.position, Scale(correction, a.inverseMass));
-  b.position = Add(b.position, Scale(correction, b.inverseMass));
+      Scale(contact.normal, relaxation * std::max(contact.penetration - 0.001f, 0.0f) / weight);
+  if (a.inverseMass > 0.0f) {
+    a.position = Sub(a.position, Scale(correction, a.inverseMass));
+  }
+  if (b.inverseMass > 0.0f) {
+    b.position = Add(b.position, Scale(correction, b.inverseMass));
+  }
 }
 
 void ResolveFloor(Body& body,
@@ -294,8 +455,13 @@ void ResolveFloor(Body& body,
                   Material material,
                   Material floorMaterial,
                   float restitutionThreshold,
-                  const Body& impactBody) {
+                  const Body& impactBody,
+                  ContactState* state,
+                  bool warmStartOnly) {
   if (body.inverseMass == 0.0f) {
+    if (state) {
+      *state = {};
+    }
     return;
   }
   Contact contact{{0, -1}, 0};
@@ -359,8 +525,16 @@ void ResolveFloor(Body& body,
       shape);
   Body floor;
   floor.inverseMass = 0.0f;
-  ResolveContact(
-      body, floor, contact, material, floorMaterial, restitutionThreshold, impactBody, floor);
+  ResolveContact(body,
+                 floor,
+                 contact,
+                 material,
+                 floorMaterial,
+                 restitutionThreshold,
+                 impactBody,
+                 floor,
+                 state,
+                 warmStartOnly);
 }
 
 } // namespace physeng::detail

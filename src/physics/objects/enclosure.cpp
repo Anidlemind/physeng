@@ -20,8 +20,10 @@ EnclosureHandle CreateEnclosure(World& world, const EnclosureDesc& desc) {
                                                {desc.center.x, desc.center.y - verticalOffset},
                                                {desc.center.x, desc.center.y + verticalOffset}}};
   const std::array<BoxShape, 4> shapes{
-      {{{halfThickness, desc.halfExtents.y}},
-       {{halfThickness, desc.halfExtents.y}},
+      // Overlap wall ends: a buried circle must exit toward the interior,
+      // rather than alternate between the exposed ends of two touching walls.
+      {{{halfThickness, desc.halfExtents.y + desc.wallThickness}},
+       {{halfThickness, desc.halfExtents.y + desc.wallThickness}},
        {{desc.halfExtents.x + desc.wallThickness, halfThickness}},
        {{desc.halfExtents.x + desc.wallThickness, halfThickness}}}};
   // Validate computed geometry before adding any walls.

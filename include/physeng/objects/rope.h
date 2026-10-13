@@ -23,11 +23,14 @@ struct RopeDesc {
   std::optional<BodyId> endBody;
   common::Vec2 startAnchor{}; // Body-local attachment points.
   common::Vec2 endAnchor{};
+  float compliance = 0.0f; // Whole rope compliance in metres/newton, shared by its segments.
+  std::optional<float> breakStretchRatio; // Per-segment limit; e.g. 1.5 allows 50% extension.
 };
 
 struct RopeHandle {
   // Includes reused endpoint bodies; only intermediate/free-end nodes are created.
   std::vector<BodyId> bodies;
+  std::vector<DistanceConstraintId> constraints; // Stable IDs, including any broken links.
 };
 
 RopeHandle CreateRope(World& world, const RopeDesc& desc);

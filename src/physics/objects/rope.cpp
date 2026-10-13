@@ -23,6 +23,13 @@ RopeHandle CreateRope(World& world, const RopeDesc& desc) {
                                 "mass, and a positive radius when collisions are enabled");
   }
 
+  if (!detail::Nonnegative(desc.compliance) ||
+      (desc.breakStretchRatio &&
+       (!std::isfinite(*desc.breakStretchRatio) || *desc.breakStretchRatio <= 1.0f))) {
+    throw std::invalid_argument("Rope compliance must be finite and nonnegative, and its break "
+                                "ratio must be finite and above one");
+  }
+
   if (desc.segmentCount == 1 && desc.startBody && desc.endBody && desc.startBody == desc.endBody) {
     throw std::invalid_argument("A one-segment rope cannot connect a body to itself");
   }
@@ -59,6 +66,7 @@ RopeHandle CreateRope(World& world, const RopeDesc& desc) {
   nodes.reserve(nodeCount);
   RopeHandle rope;
   rope.bodies.reserve(nodeCount);
+  rope.constraints.reserve(static_cast<std::size_t>(desc.segmentCount));
   for (std::size_t i = 0; i < nodeCount; ++i) {
     const double t = static_cast<double>(i) / desc.segmentCount;
     const common::Vec2 position{
@@ -89,26 +97,36 @@ RopeHandle CreateRope(World& world, const RopeDesc& desc) {
       const common::Vec2 firstAnchor = i == 1 && desc.startBody ? desc.startAnchor : common::Vec2{};
       const common::Vec2 secondAnchor =
           i == nodeCount - 1 && desc.endBody ? desc.endAnchor : common::Vec2{};
-      world.AddDistanceConstraint(
-          rope.bodies.back(), id, constraintLength, firstAnchor, secondAnchor);
-      // Adjacent rope particles may overlap without fighting the link constraint.
-      // A direct link between two existing bodies does not change their collision policy.
-      const bool bothExistingEndpoints = nodeCount == 2 && desc.startBody && desc.endBody;
-      if (!bothExistingEndpoints) {
-        world.SetCollisionEnabled(rope.bodies.back(), id, false);
-      }
-    }
-    const bool reusedEndpoint = (i == 0 && desc.startBody) || (i == nodeCount - 1 && desc.endBody);
-    if (!reusedEndpoint) {
-      // A rope does not collide with its own attached payload or support.
-      if (desc.startBody) {
-        world.SetCollisionEnabled(id, *desc.startBody, false);
-      }
-      if (desc.endBody) {
-        world.SetCollisionEnabled(id, *desc.endBody, false);
-      }
+      rope.constraints.push_back(world.AddDistanceConstraint(rope.bodies.back(),
+                                                             id,
+                                                             constraintLength,
+                                                             firstAnchor,
+                                                             secondAnchor,
+                                                             desc.compliance / desc.segmentCount,
+                                                             desc.breakStretchRatio));
     }
     rope.bodies.push_back(id);
+  }
+  const std::span<const DistanceConstraintId> links = rope.constraints;
+  const bool bothExistingEndpoints = nodeCount == 2 && desc.startBody && desc.endBody;
+  if (!bothExistingEndpoints) {
+    // Neighbor collisions are excluded only for the lifetime of their link.
+    for (std::size_t i = 0; i < links.size(); ++i) {
+      world.DisableCollisionWhileConnected(rope.bodies[i], rope.bodies[i + 1], links.subspan(i, 1));
+    }
+  }
+  for (std::size_t i = 0; i < nodeCount; ++i) {
+    const bool reusedEndpoint = (i == 0 && desc.startBody) || (i == nodeCount - 1 && desc.endBody);
+    if (reusedEndpoint) {
+      continue;
+    }
+    // Each particle ignores an endpoint only while its entire attachment path is intact.
+    if (desc.startBody) {
+      world.DisableCollisionWhileConnected(*desc.startBody, rope.bodies[i], links.first(i));
+    }
+    if (desc.endBody) {
+      world.DisableCollisionWhileConnected(rope.bodies[i], *desc.endBody, links.subspan(i));
+    }
   }
   return rope;
 }

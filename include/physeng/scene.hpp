@@ -1,8 +1,10 @@
 #pragma once
 
+#include "physeng/fluid.hpp"
 #include "physeng/objects/enclosure.hpp"
 #include "physeng/objects/rope.h"
 #include "physeng/objects/spring.hpp"
+#include "physeng/objects/softbody.hpp"
 #include "physeng/world.hpp"
 
 #include <optional>
@@ -36,12 +38,19 @@ struct SceneRopeDesc {
   std::string endBody;
 };
 
+struct SceneFluidDesc {
+  FluidSettings settings;
+  std::vector<FluidBlockDesc> blocks;
+};
+
 struct SceneDesc {
   PhysicsSettings physics{.floorY = std::nullopt};
   std::vector<SceneBodyDesc> bodies;
   std::vector<SceneSpringDesc> springs;
   std::vector<objects::EnclosureDesc> enclosures;
   std::vector<SceneRopeDesc> ropes;
+  std::vector<SceneFluidDesc> fluids;
+  std::vector<objects::SoftBodyDesc> softBodies;
 };
 
 struct Scene {
@@ -50,8 +59,11 @@ struct Scene {
   std::vector<objects::SpringHandle> springs;
   std::vector<objects::EnclosureHandle> enclosures;
   std::vector<objects::RopeHandle> ropes;
+  std::vector<Fluid> fluids;
+  std::vector<objects::SoftBodyHandle> softBodies;
 
   BodyId GetBodyId(std::string_view name) const;
+  void Step(double timeStep); // Advance rigid bodies and each fluid tank.
 };
 
 Scene CreateScene(const SceneDesc& desc);

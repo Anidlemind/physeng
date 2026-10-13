@@ -5,5 +5,5 @@
 
 namespace physeng::detail {
 
-void SolveDistance(Body& a, Body& b, const DistanceConstraint& constraint, float dt);
+void SolveDistance(Body& a, Body& b, DistanceConstraint& constraint, float dt);
 } // namespace physeng::detail

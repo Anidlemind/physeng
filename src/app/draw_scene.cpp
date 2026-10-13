@@ -1,4 +1,5 @@
 #include "draw_scene.hpp"
+#include "draw_water.hpp"
 #include "mouse_drag.hpp"
 #include "physeng/scene.hpp"
 #include "physeng/shape.hpp"
@@ -19,6 +20,7 @@ constexpr Color wallColor{0.32f, 0.36f, 0.42f, 1.0f};
 constexpr Color boxColor{0.88f, 0.57f, 0.38f, 1.0f};
 constexpr Color circleColor{0.40f, 0.65f, 0.79f, 1.0f};
 constexpr Color ropeColor{0.76f, 0.72f, 0.62f, 1.0f};
+constexpr Color strainedRopeColor{0.95f, 0.22f, 0.16f, 1.0f};
 constexpr Color springColor{0.53f, 0.76f, 0.62f, 1.0f};
 constexpr Color highlightColor{0.98f, 0.79f, 0.43f, 1.0f};
 
@@ -99,11 +101,24 @@ void DrawBodies(renderer::Renderer& renderer,
 }
 
 void DrawConnections(renderer::Renderer& renderer, const physeng::World& world) {
-  renderer.SetColor(ropeColor);
   for (const auto& connection : world.Constraints()) {
+    if (connection.broken) {
+      continue;
+    }
     const auto start = world.GetBody(connection.first).LocalToWorld(connection.firstAnchor);
     const auto end = world.GetBody(connection.second).LocalToWorld(connection.secondAnchor);
-    renderer.DrawSegment(start, end, 0.035f);
+    float strain = 0.0f;
+    if (connection.breakStretchRatio) {
+      const float stretchRatio = std::hypot(end.x - start.x, end.y - start.y) / connection.length;
+      // Map rest length to zero and the break limit to one, then clamp compression/overshoot.
+      strain =
+          std::clamp((stretchRatio - 1.0f) / (*connection.breakStretchRatio - 1.0f), 0.0f, 1.0f);
+    }
+    renderer.SetColor({std::lerp(ropeColor.r, strainedRopeColor.r, strain),
+                       std::lerp(ropeColor.g, strainedRopeColor.g, strain),
+                       std::lerp(ropeColor.b, strainedRopeColor.b, strain),
+                       ropeColor.a});
+    renderer.DrawSegment(start, end, 0.05f);
   }
 }
 } // namespace
@@ -111,7 +126,8 @@ void DrawConnections(renderer::Renderer& renderer, const physeng::World& world) 
 void DrawScene(renderer::Renderer& renderer,
                const physeng::Scene& scene,
                const MouseDrag& drag,
-               std::optional<common::Vec2> cursor) {
+               std::optional<common::Vec2> cursor,
+               WaterDrawing& waterDrawing) {
   auto highlighted = drag.SelectedBody();
   if (!highlighted && cursor) {
     highlighted = PickBody(scene.world, *cursor);
@@ -119,6 +135,9 @@ void DrawScene(renderer::Renderer& renderer,
 
   renderer.BeginFrame(backgroundColor);
   DrawGrid(renderer);
+  for (const auto& water : scene.fluids) {
+    waterDrawing.Draw(renderer, water);
+  }
   DrawConnections(renderer, scene.world);
   DrawBodies(renderer, scene, highlighted);
 

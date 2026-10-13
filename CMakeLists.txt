@@ -5,27 +5,50 @@ project(Physeng
   VERSION 0.1.0
   LANGUAGES C CXX)
 
+# Optimize normal builds while retaining symbols. An explicit Debug/Release choice wins.
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
+option(PHYSENG_ENABLE_IPO "Enable link-time optimization in optimized builds when supported" ON)
+if(PHYSENG_ENABLE_IPO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT PHYSENG_IPO_SUPPORTED LANGUAGES CXX)
+endif()
+
 function(configure_cpp_target target)
   target_compile_features(${target} PUBLIC cxx_std_20)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+  if(PHYSENG_ENABLE_IPO AND PHYSENG_IPO_SUPPORTED)
+    set_target_properties(${target} PROPERTIES
+      INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+      INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
+  endif()
 endfunction()
 
 add_library(common INTERFACE)
 target_include_directories(common INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_library(physeng_physics STATIC
+  src/physics/fluid.cpp
+  src/physics/fluid_solids.cpp
   src/physics/polygon.cpp
   src/physics/polygon_collision.cpp
   src/physics/body.cpp
   src/physics/world.cpp
+  src/physics/broad_phase.cpp
   src/physics/collision.cpp
+  src/physics/sweep.cpp
+  src/physics/collision_solver.cpp
   src/physics/collision_filter.cpp
+  src/physics/collision_query.cpp
   src/physics/distance_constraint.cpp
   src/physics/forces.cpp
   src/physics/springs.cpp
   src/physics/scene.cpp
   src/physics/objects/enclosure.cpp
   src/physics/objects/spring.cpp
+  src/physics/objects/softbody.cpp
   src/physics/objects/rope.cpp)
 target_link_libraries(physeng_physics PUBLIC common)
 configure_cpp_target(physeng_physics)
@@ -63,8 +86,13 @@ if(PHYSENG_BUILD_APP)
 
   add_executable(Physeng
     main.cpp
+    src/app/particle_demo.cpp
+    src/app/water_demo.cpp
+    src/app/puffer_scene.cpp
+    src/app/puffer_demo.cpp
     src/app/demo_scene.cpp
     src/app/draw_scene.cpp
+    src/app/draw_water.cpp
     src/app/mouse_drag.cpp)
   target_link_libraries(Physeng PRIVATE physeng_physics renderer)
   configure_cpp_target(Physeng)
